@@ -27,24 +27,56 @@ namespace Bulk1
 
             foreach (var sqlNode in doc.Root.Elements("BulkCopy"))
             {
-                var oserver = sqlNode?.Attribute("SourceServer")?.Value;
-                var dserver = sqlNode?.Attribute("DestServer")?.Value;
+                var sourceServer = sqlNode?.Attribute("SourceServer")?.Value;
+                var destServer = sqlNode?.Attribute("DestServer")?.Value;
                 var sourceDb = sqlNode?.Attribute("SourceDb")?.Value;
                 var destDb = sqlNode?.Attribute("DestDb")?.Value;
-                var dtable = sqlNode?.Attribute("DestTable")?.Value;
+                var destTable = sqlNode?.Attribute("DestTable")?.Value;
                 var sql = sqlNode.Value;
-                DoBulkCopy(dserver, ddb, dtable, oserver, odb, sql);
+                DoBulkCopy(destServer, destDb, destTable, sourceServer, sourceDb, sql);
             }
         }
 
         private void DoBulkCopy(string dserver, string ddb, string dtable, string oserver, string odb, string sql)
         {
-            var builder = new SqlConnectionStringBuilder
+            var builderDest = new SqlConnectionStringBuilder
             {
                 DataSource = dserver,
-                InitialCatalog = dbName,
+                InitialCatalog = ddb,
                 IntegratedSecurity = true
             };
+
+            var builderSource = new SqlConnectionStringBuilder
+            {
+                DataSource = oserver,
+                InitialCatalog = odb,
+                IntegratedSecurity = true
+            };
+
+            using (var sourceConnection = new SqlConnection(builderSource.ToString()))
+            using (var command = new SqlCommand(sql, sourceConnection))
+            {
+                sourceConnection.Open();
+                using (var sourceReader = command.ExecuteReader())
+                using (var destConnection = new SqlConnection(builderDest.ToString()))
+                {
+                    destConnection.Open();
+                    using (SqlBulkCopy bulkCopy =
+                           new SqlBulkCopy(destConnection))
+                    {
+                        bulkCopy.DestinationTableName = dtable;
+                        try
+                        {
+                            bulkCopy.WriteToServer(sourceReader);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine(ex.Message);
+                        }
+                        sourceReader.Close();
+                    }
+                }
+            }
         }
 
         private static int SqlNonQuery(string server, string dbName, string sql, Action<IDbCommand> action = null)
